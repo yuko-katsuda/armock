@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <script type="module">
+    // ライブラリの読み込み
+    import * as THREE from 'https://cdn.skypack.dev/three';
+    import { MathUtils } from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
+    import { DeviceOrientationControls } from './DeviceOrientationControls.js';
+
+    // load後にinitを実行
+    window.addEventListener('load', init);
+
+    var $view, $video, $button, os;
+
+    // windowの幅と高さを取得
+    var width = window.innerWidth;
+    var height = window.innerHeight;
+
+    // ユーザーエージェントを取得
+    const ua = navigator.userAgent;
+    if (ua.indexOf('Android') > -1)
+    {
+      os = 'android';
+    }
+    else if (ua.indexOf('iPhone') > -1)
+    {
+      os = 'ios';
+    }
+
+    function init()
+    {
+      // html要素を取得
+      $view = document.querySelector('#view');
+      $video = document.querySelector('#video');
+      $button = document.querySelector('#button');
+
+      // ボタンをクリックするとonClickを実行
+      $button.addEventListener('click', ()=>{
+        onClick();
+      });
+    }
+
+    function onClick()
+    {
+      // ボタン押下後、非表示にする
+      $button.classList.add('hide');
+
+      // 3D、カメラ、位置情報を順番に取得していく
+      setup3D(()=>{
+        Promise.resolve()
+          .then( () => setupCamera() )
+          .then( () => setupGeo() )
+          .then( (data) => {
+            console.log(data);
+          })
+        ;
+      });
+    }
+
+    function setup3D(resolve)
+    {
+      // レンダラーを作成
+      const renderer = new THREE.WebGLRenderer({alpha: true, canvas: $view});
+      // レンダラーの比率を調整
+      let dpr = window.devicePixelRatio;
+      if(dpr < 1)
+      {
+        dpr = 1;
+      }
+      else if(dpr > 2)
+      {
+        dpr = 2;
+      }
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(width, height);
+
+      // シーンを作成
+      const scene = new THREE.Scene();
+
+      // カメラを作成
+      const camera = new THREE.PerspectiveCamera(80, width / height, 0.1, 100);
+      camera.position.set(0, 0, 5);
+
+      // DeviceOrientationControlsをコネクトさせる
+      var controls = new DeviceOrientationControls(camera);
+      controls.connect();
+
+      // iOSのとき、一度だけalphaOffsetに補正値を渡す
+      if(os == 'ios')
+      {
+        var deg = 0;
+        var diff = null;
+        var doneCalibration = false;
+
+        window.addEventListener('deviceorientation', (e)=> {
+          deg = e.webkitCompassHeading;
+          if(deg != 0 && diff == null)
+          {
+            diff = deg;
+          }
+
+          if(!doneCalibration)
+          {
+            doneCalibration = true;
+            controls.alphaOffset = MathUtils.degToRad( - diff );
+          }
+
+        }, true);
+      }
+      
+      
+      // 立方体を作成(幅, 高さ, 奥行き)
+      const geometry = new THREE.BoxGeometry(1, 1, 1);
+      const material = new THREE.MeshNormalMaterial();
+      const box = new THREE.Mesh(geometry, material);
+      box.position.set(0, 0, 0);
+      scene.add(box);
+
+      // 3Dを表示
+      $view.classList.add('show');
+
+      update();
+      resolve();
+
+      function update()
+      {
+        requestAnimationFrame(update);
+
+        // レンダーを更新
+        renderer.render(scene, camera);
+
+        // コントロールを更新
+        controls.update();
+      }
+    }
+
+    function setupCamera()
+    {
+      return new Promise((resolve, reject)=>{
+        
+        // ブラウザ別対応
+        window.mediaDevices = navigator.mediaDevices || ((navigator.mozGetUserMedia || navigator.webkitGetUserMedia) ? 
+        {
+          getUserMedia: (c)=> {
+            return new Promise((y, n)=> {
+              (navigator.mozGetUserMedia ||
+              navigator.webkitGetUserMedia).call(navigator, c, y, n);
+            });
+          }
+        } : null);
+
+        // カメラの設定
+        const mediaConstraints = {
+          audio: false,
+          video: {
+            width: 1920,
+            height: 1080,
+            facingMode: { exact: 'environment' } // リアカメラを使用
+          }
+        };
+
+        // ストリームの取得開始
+        window.mediaDevices.getUserMedia(mediaConstraints)
+        .then((stream)=>
+        { 
+          $video.srcObject = stream;
+
+          // 動画のメタデータを読み終えたら実行
+          $video.onloadedmetadata = (e) =>
+          {
+            // 動画スタート
+            $video.play();
+            resolve();
+          };
+        })
+        .catch((err) =>
+        {
+          reject();
+        });
+      });
+    }
+
+    function setupGeo()
+    {
+      return new Promise((resolve, reject)=>{
+        try
+        {
+          // ユーザの座標を取得
+          navigator.geolocation.getCurrentPosition((data)=>{
+            resolve(data);
+          }, 
+          (e)=>{
+            reject(e);
+          });
+        }
+        catch(e)
+        {
+          reject(e);
+        }
+      });
+    }
+
+  </script>
+
+  <style>
+    #video{
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+    }
+    #view{
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      display: none;
+    }
+    #view.show{
+      display: block;
+    }
+    #button{
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      margin: auto;
+      font-size: 40px;
+      font-weight: bold;
+      width: 400px;
+      height: 100px;
+      background: #000000;
+      color: #fff;
+      text-align: center;
+      line-height: 100px;
+    }
+    #button.hide{
+      display:none;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" playsinline="playsinline"></video>
+  <canvas id="view"></canvas>
+  <div id="button">START</div>
+</body>
+</html>
